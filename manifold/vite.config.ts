@@ -27,7 +27,7 @@ function groqDevApi(mode: string): Plugin {
     name: 'groq-dev-api',
     configureServer(server) {
       server.middlewares.use('/api/groq', async (req, res) => {
-        const { handleGroq } = (await server.ssrLoadModule('/api/_groq.ts')) as { handleGroq: (r: Request, key: string | undefined) => Promise<Response> }
+        const { handleGroq } = (await server.ssrLoadModule('/api/groq.ts')) as { handleGroq: (r: Request, key: string | undefined) => Promise<Response> }
         const chunks: Buffer[] = []
         for await (const c of req) chunks.push(c as Buffer)
         const host = req.headers.host ?? 'localhost'
