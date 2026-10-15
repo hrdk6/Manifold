@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Seg, Toggle } from '../controls';
 import { IconX } from '../icons';
 import { complete, LlmError, ollamaModels } from '../../rag/llm';
-import { CLAUDE_MODELS, hasModel, settings, useSettings, type Provider } from '../../rag/settings';
+import { CLAUDE_MODELS, GROQ_MODELS, hasModel, isCloud, settings, useSettings, type Provider } from '../../rag/settings';
 import { runEmbedding } from '../../rag/kb';
 
 type Test = { state: 'idle' } | { state: 'busy' } | { state: 'ok'; msg: string } | { state: 'fail'; msg: string };
@@ -63,16 +63,48 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         <section className="sheet__section">
           <h3>Answer model</h3>
           <p className="sheet__note">The model writes answers from the passages the search finds. Without one, the assistant shows the passages only.</p>
-          <Seg<Provider>
-            label="Provider"
-            value={s.provider}
-            onChange={(provider) => settings.set({ provider })}
-            options={[
-              { value: 'anthropic', label: 'Claude' },
-              { value: 'ollama', label: 'Ollama (local)' },
-              { value: 'openai', label: 'Other server' },
-            ]}
-          />
+          {!isCloud && (
+            <Seg<Provider>
+              label="Provider"
+              value={s.provider}
+              onChange={(provider) => settings.set({ provider })}
+              options={[
+                { value: 'groq', label: 'Groq' },
+                { value: 'anthropic', label: 'Claude' },
+                { value: 'ollama', label: 'Ollama (local)' },
+                { value: 'openai', label: 'Other server' },
+              ]}
+            />
+          )}
+
+          {s.provider === 'groq' && (
+            <div className="form-grid">
+              <div className="form-row">
+                <span>Model</span>
+                <div className="model-list" role="radiogroup" aria-label="Groq model">
+                  {GROQ_MODELS.map((m) => (
+                    <button key={m.id} type="button" role="radio" aria-checked={s.groqModel === m.id} className="model-opt" onClick={() => settings.set({ groqModel: m.id })}>
+                      <strong>{m.label}</strong>
+                      <span>{m.note}</span>
+                    </button>
+                  ))}
+                </div>
+                <small>
+                  If the chosen model is busy, the other two take over automatically. The Groq key is kept on the server, so there is nothing to enter here.
+                </small>
+              </div>
+              <Seg
+                label="Thinking effort"
+                value={s.effort}
+                onChange={(effort) => settings.set({ effort })}
+                options={[
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
+                ]}
+              />
+            </div>
+          )}
 
           {s.provider === 'anthropic' && (
             <div className="form-grid">
@@ -211,7 +243,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
               label={
                 <span>
                   <strong>Query rewriting</strong> lets the answer model expand your question and resolve follow-ups before searching
-                  {s.provider !== 'anthropic' && ' (with a local model, follow-up questions only, as it costs an extra model call)'}
+                  {s.provider !== 'anthropic' && s.provider !== 'groq' && ' (with a local model, follow-up questions only, as it costs an extra model call)'}
                 </span>
               }
               checked={s.rewrite}

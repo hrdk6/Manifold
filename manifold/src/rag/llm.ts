@@ -4,6 +4,7 @@
  * models locally; any OpenAI-compatible server works through its chat endpoint.
  */
 import type Anthropic from '@anthropic-ai/sdk';
+import { streamChat, wireMessages } from './openai-stream';
 import type { AssistantSettings } from './settings';
 
 export interface LlmMessage {
@@ -20,6 +21,8 @@ export interface LlmRequest {
   /** JSON schema the reply must follow */
   schema?: Record<string, unknown>;
   effort?: 'low' | 'medium' | 'high';
+  /** use this model instead of the one in settings (Groq only) */
+  model?: string;
   signal?: AbortSignal;
   onText?: (full: string) => void;
   onThinking?: (full: string) => void;
@@ -125,7 +128,7 @@ async function claude(s: AssistantSettings, req: LlmRequest): Promise<LlmResult>
 
 const trimUrl = (u: string) => u.trim().replace(/\/+$/, '');
 
-async function* lines(res: Response) {
+export async function* readLines(res: Response) {
   const reader = res.body!.getReader();
   const dec = new TextDecoder();
   let buf = '';
@@ -197,7 +200,7 @@ async function ollama(s: AssistantSettings, req: LlmRequest): Promise<LlmResult>
   let text = '';
   let thinking = '';
   let usage: LlmResult['usage'];
-  for await (const line of lines(res)) {
+  for await (const line of readLines(res)) {
     const m = JSON.parse(line) as { message?: { content?: string; thinking?: string }; done?: boolean; error?: string; prompt_eval_count?: number; eval_count?: number };
     if (m.error) throw new LlmError(`Ollama: ${m.error}`);
     if (m.message?.thinking) {
@@ -228,62 +231,70 @@ export async function ollamaModels(base: string): Promise<string[]> {
 
 /* ------------------------------------------------------------------ OpenAI-compatible */
 
-async function openaiCompat(s: AssistantSettings, req: LlmRequest): Promise<LlmResult> {
-  const url = `${trimUrl(s.openaiUrl)}/chat/completions`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(s.openaiKey ? { Authorization: `Bearer ${s.openaiKey.trim()}` } : {}) },
-      signal: req.signal,
-      body: JSON.stringify({
-        model: s.openaiModel,
-        stream: true,
-        temperature: req.schema ? 0.2 : 0.4,
-        max_tokens: req.maxTokens,
-        messages: [
-          { role: 'system', content: req.system },
-          ...req.messages.map((m) =>
-            m.images?.length
-              ? { role: m.role, content: [...m.images.map((u) => ({ type: 'image_url', image_url: { url: u } })), { type: 'text', text: m.content }] }
-              : { role: m.role, content: m.content },
-          ),
-        ],
-        ...(req.schema ? { response_format: { type: 'json_schema', json_schema: { name: 'reply', schema: req.schema } } } : {}),
-      }),
-    });
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') throw err;
-    throw new LlmError(`Could not reach ${trimUrl(s.openaiUrl)}.`, 'Check the server address, and that it allows requests from this page.');
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new LlmError(`The server returned ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}.`, 'Check the model name and key in Assistant settings.');
-  }
-  let text = '';
-  for await (const line of lines(res)) {
-    if (!line.startsWith('data:')) continue;
-    const data = line.slice(5).trim();
-    if (data === '[DONE]') break;
-    const m = JSON.parse(data) as { choices?: { delta?: { content?: string } }[] };
-    const d = m.choices?.[0]?.delta?.content;
-    if (d) {
-      text += d;
-      const cut = loopCut(text);
-      if (cut !== null) {
-        text = text.slice(0, cut).trimEnd();
-        req.onText?.(text);
-        return { text, model: s.openaiModel, stop: 'loop' };
-      }
-      req.onText?.(text);
-    }
-  }
-  return { text, model: s.openaiModel };
+function openaiCompat(s: AssistantSettings, req: LlmRequest): Promise<LlmResult> {
+  const base = trimUrl(s.openaiUrl);
+  return streamChat(
+    {
+      url: `${base}/chat/completions`,
+      headers: s.openaiKey ? { Authorization: `Bearer ${s.openaiKey.trim()}` } : {},
+      model: s.openaiModel,
+      label: base,
+      explain: (status, body) => new LlmError(`The server returned ${status}${body ? `: ${body.slice(0, 200)}` : ''}.`, 'Check the model name and key in Assistant settings.'),
+    },
+    req,
+    {
+      model: s.openaiModel,
+      stream: true,
+      temperature: req.schema ? 0.2 : 0.4,
+      max_tokens: req.maxTokens,
+      messages: wireMessages(req),
+      ...(req.schema ? { response_format: { type: 'json_schema', json_schema: { name: 'reply', schema: req.schema } } } : {}),
+    },
+  );
+}
+
+/* ------------------------------------------------------------------ Groq (through /api/groq) */
+
+function groq(s: AssistantSettings, req: LlmRequest): Promise<LlmResult> {
+  const model = req.model ?? s.groqModel;
+  // JSON mode needs the shape spelled out in the prompt
+  const system = req.schema ? `${req.system}\n\nReply with one JSON object that matches this JSON Schema exactly, and nothing else:\n${JSON.stringify(req.schema)}` : req.system;
+  return streamChat(
+    {
+      url: '/api/groq',
+      headers: {},
+      model,
+      label: 'the assistant service',
+      explain: (status, body) => {
+        let msg = '';
+        try {
+          msg = (JSON.parse(body) as { error?: { message?: string } }).error?.message ?? '';
+        } catch {
+          /* not JSON */
+        }
+        if (status === 404) return new LlmError('The Groq service is not available here.', 'Run the app with `npm run dev`, or deploy it with the api folder.');
+        if (status === 429) return new LlmError('All three Groq models are rate-limited right now.', 'Wait a minute and ask again. Fewer passages per answer use less of the limit.');
+        if (status === 413) return new LlmError('That question and its passages are too large for Groq.', 'Lower "Passages per answer" in settings, or ask about a smaller part.');
+        if (status === 500 && /GROQ_API_KEY/.test(msg)) return new LlmError(msg, 'Add GROQ_API_KEY to the .env file (or the project environment variables) and restart.');
+        return new LlmError(msg || `Groq returned an error (${status}).`, 'Try again in a moment.');
+      },
+    },
+    req,
+    {
+      model,
+      messages: wireMessages({ system, messages: req.messages }),
+      max_tokens: req.maxTokens ?? 4096,
+      temperature: req.schema ? 0.2 : 0.4,
+      json: !!req.schema,
+      reasoning_effort: req.effort ?? s.effort,
+    },
+  );
 }
 
 /* ------------------------------------------------------------------ entry points */
 
 export function complete(s: AssistantSettings, req: LlmRequest): Promise<LlmResult> {
+  if (s.provider === 'groq') return groq(s, req);
   if (s.provider === 'anthropic') return claude(s, req);
   if (s.provider === 'ollama') return ollama(s, req);
   return openaiCompat(s, req);

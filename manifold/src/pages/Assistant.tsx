@@ -114,7 +114,7 @@ export default function Assistant() {
       const st = settings.get();
       const model = hasModel(st);
       const steps: Stage[] = [
-        ...(model && st.rewrite && m !== 'summary' && (st.provider === 'anthropic' || history.length > 0) ? (['plan'] as Stage[]) : []),
+        ...(model && st.rewrite && m !== 'summary' && (st.provider === 'anthropic' || st.provider === 'groq' || history.length > 0) ? (['plan'] as Stage[]) : []),
         'search',
         ...(st.rerank && m !== 'summary' ? (['rerank'] as Stage[]) : []),
         ...(model ? (['write'] as Stage[]) : []),
@@ -422,7 +422,7 @@ export default function Assistant() {
                           ? `“${live.standalone}”`
                           : live.stage === 'write' && live.drafted
                             ? `${Math.round(live.drafted / 6)} words drafted`
-                            : live.stage === 'write' && !live.text && s.provider !== 'anthropic'
+                            : live.stage === 'write' && !live.text && s.provider === 'ollama'
                               ? 'a local model can take a minute or two'
                               : undefined
                       }

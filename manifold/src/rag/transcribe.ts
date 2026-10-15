@@ -3,7 +3,7 @@ import * as db from './db';
 import { getDoc, reprocess } from './kb';
 import { complete } from './llm';
 import { TRANSCRIBE } from './prompts';
-import { hasModel, settings } from './settings';
+import { GROQ_MODELS, hasModel, settings } from './settings';
 
 async function blobToJpeg(blob: Blob, maxSide = 1800): Promise<string> {
   const bmp = await createImageBitmap(blob);
@@ -53,6 +53,8 @@ export async function transcribeDoc(docId: string, onProgress: (done: number, to
         messages: [{ role: 'user', content: `Transcribe page ${p} of "${doc.title}".`, images: [url] }],
         maxTokens: 8000,
         effort: 'low',
+        // Groq's reasoning models are text-only, so scans go to the vision model
+        model: GROQ_MODELS.find((m) => m.vision)?.id,
         signal,
         onText: (t) => onProgress(i, todo.length, Math.round(t.length / 6)),
       });

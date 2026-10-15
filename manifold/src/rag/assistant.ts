@@ -78,7 +78,7 @@ export async function runTurn(input: TurnInput): Promise<Partial<ChatTurn> & { q
     let plan: Plan = { standalone: question, queries: [], hypothetical: '', search: true };
     let tPlan: number | undefined;
     // On a local model the extra call costs real time, so only rewrite follow-ups there.
-    const plan_ = model && s.rewrite && (s.provider === 'anthropic' || input.history.length > 0);
+    const plan_ = model && s.rewrite && (s.provider === 'anthropic' || s.provider === 'groq' || input.history.length > 0);
     if (plan_) {
       onUpdate({ stage: 'plan' });
       const t0 = performance.now();
@@ -146,7 +146,7 @@ export async function runTurn(input: TurnInput): Promise<Partial<ChatTurn> & { q
     messages: [...historyMessages(input.history), { role: 'user', content: wire }],
     schema: mode === 'quiz' ? quizSchema : mode === 'cards' ? cardsSchema : undefined,
     signal,
-    maxTokens: s.provider === 'anthropic' ? 16000 : 4096,
+    maxTokens: s.provider === 'anthropic' ? 16000 : s.provider === 'groq' ? 6000 : 4096,
     onText: structured ? (text) => onUpdate({ stage: 'write', drafted: text.length }) : (text) => onUpdate({ stage: 'write', text }),
     onThinking: (thinking) => onUpdate({ stage: 'write', thinking }),
   });

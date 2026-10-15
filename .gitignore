@@ -2,3 +2,10 @@
 # Course materials (not for sharing)
 drive-download-*/
 .claude/
+
+# secrets and editor files
+.env
+.env.*
+!.env.example
+.idea/
+.playwright-mcp/

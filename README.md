@@ -46,6 +46,19 @@ Pick an answer style: **Answer**, **Teach me**, **Exam answer** (5, 8 or 10 mark
 You can also summarise a whole document. Click any citation like [2] to see the passage, jump to the lesson section
 or view the original PDF page.
 
+### Groq key
+
+Create a key at [console.groq.com](https://console.groq.com/keys) and put it in a `.env` file (see
+`manifold/.env.example`):
+
+```
+GROQ_API_KEY=your-key-here
+```
+
+`.env` is git-ignored. `npm run dev` serves it through a local `/api/groq` route; on Vercel the same code runs as a
+serverless function (`manifold/api`), with the key set under Project Settings, Environment Variables. The function
+only accepts requests from its own site, allows three models, caps request size and rate-limits each visitor.
+
 ### Connect a model
 
 Without one, the assistant still searches and shows the best-matching passages. For written answers, open the gear
@@ -53,6 +66,7 @@ icon and choose:
 
 | Provider | Notes |
 | --- | --- |
+| **Groq** (default) | Fast hosted models: **GPT-OSS 120B** (best reasoning), **Qwen 3.8 27B** (also reads scanned pages) and **GPT-OSS 20B** (quickest). If one is rate-limited the next takes over. The key lives on the server, never in the browser. This is the only option on the deployed site. |
 | **Claude** | Paste an API key from [platform.claude.com](https://platform.claude.com/settings/keys). Opus 5.5 by default; Sonnet 5.5 and Haiku 5.5 are faster and cheaper. The key stays in your browser and goes only to Anthropic. |
 | **Ollama** | Free and offline. Install [Ollama](https://ollama.com), run `ollama pull gemma4:12b`, then pick it in settings. On a CPU expect minutes per answer. |
 | **Other server** | Anything with an OpenAI-style chat endpoint, such as LM Studio. |
